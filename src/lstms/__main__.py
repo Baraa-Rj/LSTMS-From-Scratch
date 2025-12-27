@@ -1,18 +1,22 @@
+
 import numpy as np
 from Tokenizer import Tokenizer
+from Cell import Cell
 def main() -> None:
-   
-   text = "hello world"
-   seq_length = 5
-   inputs, targets, tokenizer = create_training_data(text, seq_length)
-   print("Inputs:", inputs)
-   print("Targets:", targets)
-   print(f"First input: {tokenizer.decode(inputs[0])}")
-   print(f"First target: {tokenizer.decode([targets[0]])}")
-   print(f"Total sequences: {len(inputs)}")
-   # Verify: the last 4 chars of input + target should equal the next sequence's first 5 chars
-   print(f"\nVerification: '{tokenizer.decode(inputs[0])}' -> '{tokenizer.decode([targets[0]])}'")
-   print("Data preparation successful!")
+  vocab_size = 26
+  hidden_size = 128
+  cell = Cell(vocab_size, hidden_size)
+  x = np.zeros((vocab_size, 1))
+  x[0] = 1
+  h = np.zeros((hidden_size, 1))
+  C = np.zeros((hidden_size, 1))
+  h_new, C_new, cache = cell.forward(x, h, C)
+  assert h_new.shape == (hidden_size, 1)
+  assert C_new.shape == (hidden_size, 1)
+
+  assert np.all(h_new >= -1) and np.all(h_new <= 1)
+  print("✓ Forward pass works")
+  
    
 def create_training_data(text, seq_length):
     inputs = []
