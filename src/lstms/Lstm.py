@@ -71,11 +71,17 @@ class Lstm:
             probs = Activation.softmax(logits)
             
             correct_char_prob = probs[target_idx, 0]
-            total_loss += -np.log(correct_char_prob + 1e-8)  # Add small value to avoid log(0)
+            
+            # Clamp probability to valid range
+            correct_char_prob = np.clip(correct_char_prob, 1e-10, 1.0 - 1e-10)
+            
+            loss = -np.log(correct_char_prob)
+            total_loss += loss
             
             # Gradient of cross-entropy loss w.r.t logits (softmax + CE derivative)
             dY = probs.copy()
             dY[target_idx] -= 1
             dYs.append(dY)
         
-        return total_loss / len(target_indices), dYs
+        avg_loss = total_loss / len(target_indices)
+        return avg_loss, dYs

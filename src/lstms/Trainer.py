@@ -33,36 +33,46 @@ class Trainer:
         self.lstm.cell.Wo -= self.learning_rate * cell_grads["dWo"]
         self.lstm.cell.bo -= self.learning_rate * cell_grads["dbo"]
 
-    def train_step(self,inputs,target,epochs,print_every = 10):
+    def train_step(self, inputs, targets):
+        """Train on a single sequence
+        
+        Args:
+            inputs: list of character indices (input sequence)
+            targets: list of character indices (target sequence)
+            
+        Returns:
+            loss: average loss for this sequence
+        """
+        # Forward pass
+        outputs, hs, caches = self.lstm.forward(inputs)
+        
+        # Compute loss and gradients
+        loss, dYs = self.lstm.compute_loss(outputs, targets)
+        
+        # Backward pass
+        dWy, dby, cell_grads = self.lstm.backward(dYs, caches)
+        
+        # Update weights
+        self.update_weights(dWy, dby, cell_grads)
+        
+        return loss
+    
+    def train(self, inputs_list, targets_list, epochs, print_every=1):
+      
         losses = []
-        num_samples = len(inputs)
+        num_sequences = len(inputs_list)
+        
         for epoch in range(epochs):
-            total_loss = 0
-            for i in range(num_samples):
-                input_seq = inputs[i]
-                target_idx = target[i]
-
-                ys, hs, caches = self.lstm.forward(input_seq)
-
-                exp_scores = np.exp(ys[-1] - np.max(ys[-1]))
-                probs = exp_scores / np.sum(exp_scores)
-
-                loss = -np.log(probs[target_idx][0])
-                total_loss += loss
-
-                dY = probs.copy()
-                dY[target_idx] -= 1
-
-                dYs = [np.zeros_like(y) for y in ys]
-                dYs[-1] = dY
-
-                dWy, dby, cell_grads = self.lstm.backward(dYs, caches)
-
-                self.update_weights(dWy, dby, cell_grads)
-
-            avg_loss = total_loss / num_samples
+            epoch_loss = 0
+            
+            for inputs, targets in zip(inputs_list, targets_list):
+                loss = self.train_step(inputs, targets)
+                epoch_loss += loss
+            
+            avg_loss = epoch_loss / num_sequences
             losses.append(avg_loss)
-
+            
             if (epoch + 1) % print_every == 0:
-                print(f'Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}')
+                print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
+        
         return losses
