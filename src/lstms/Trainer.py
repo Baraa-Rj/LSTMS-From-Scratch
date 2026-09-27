@@ -34,15 +34,6 @@ class Trainer:
         self.lstm.cell.bo -= self.learning_rate * cell_grads["dbo"]
 
     def train_step(self, inputs, targets):
-        """Train on a single sequence
-        
-        Args:
-            inputs: list of character indices (input sequence)
-            targets: list of character indices (target sequence)
-            
-        Returns:
-            loss: average loss for this sequence
-        """
         # Forward pass
         outputs, hs, caches = self.lstm.forward(inputs)
         

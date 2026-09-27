@@ -7,22 +7,12 @@ class Generator:
         self.tokenizer = tokenizer
 
     def generate(self, seed_text, length, temperature=1.0):
-        """Generate text starting from seed_text
-        
-        Args:
-            seed_text: starting text to condition generation
-            length: number of new characters to generate
-            temperature: sampling temperature (0.5=conservative, 1.0=normal, 2.0=creative)
-        
-        Returns:
-            generated text (seed + new characters)
-        """
+  
         encoded = self.tokenizer.encode(seed_text)
         h = np.zeros((self.lstm.hidden_size, 1))
         C = np.zeros((self.lstm.hidden_size, 1))
         generated_indices = []
 
-        # Warm up state with seed text
         for idx in encoded:
             x = self.lstm.one_hot(idx)
             h, C, _ = self.lstm.cell.forward(x, h, C)
@@ -50,7 +40,6 @@ class Generator:
                 else:
                     probs = np.ones(len(probs)) / len(probs)
             
-            # Ensure probabilities sum to 1 (fix floating point errors)
             probs = probs / np.sum(probs)
             
             current_idx = np.random.choice(range(self.lstm.input_size), p=probs)

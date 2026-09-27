@@ -54,7 +54,7 @@ def main() -> None:
     print(f"   Gradient clipping: 5.0")
     
     print(f"\n4. Training...")
-    epochs = 100
+    epochs = 10
     losses = trainer.train(inputs_list, targets_list, epochs=epochs, print_every=10)
     
     print(f"\n5. Training complete!")
