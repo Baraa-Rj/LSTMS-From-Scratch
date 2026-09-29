@@ -97,3 +97,18 @@ def test_generate_returns_seed_plus_n_vocab_characters():
         assert text.startswith("hel")
         assert len(text) == len("hel") + 20
         assert set(text) <= set(tokenizer.chars)
+
+
+def make_generator():
+    tokenizer = Tokenizer(CORPUS)
+    return Generator(Lstm(input_size=tokenizer.vocab_size, hidden_size=8), tokenizer)
+
+
+def test_generate_rejects_empty_seed():
+    with pytest.raises(ValueError, match="empty"):
+        make_generator().generate("", 5)
+
+
+def test_generate_rejects_out_of_vocabulary_seed():
+    with pytest.raises(ValueError, match="not in the vocabulary.*'Z'"):
+        make_generator().generate("heZ", 5)

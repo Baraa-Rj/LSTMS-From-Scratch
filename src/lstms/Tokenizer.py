@@ -9,6 +9,9 @@ class Tokenizer:
         self.idx_to_char = {i: ch for i, ch in enumerate(self.chars)}
 
     def encode(self,text):
+        unknown = sorted(set(text) - set(self.char_to_idx))
+        if unknown:
+            raise ValueError(f"Characters not in the vocabulary: {unknown}")
         return [self.char_to_idx[ch] for ch in text]
     def decode(self,indices):
         return ''.join([self.idx_to_char[idx] for idx in indices])
