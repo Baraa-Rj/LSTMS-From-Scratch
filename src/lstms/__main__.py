@@ -1,8 +1,8 @@
 import numpy as np
-from Tokenizer import Tokenizer
-from Lstm import Lstm
-from Trainer import Trainer
-from Generator import Generator
+from .Tokenizer import Tokenizer
+from .Lstm import Lstm
+from .Trainer import Trainer
+from .Generator import Generator
 
 def prepare_training_data(text, seq_length):
     tokenizer = Tokenizer(text)

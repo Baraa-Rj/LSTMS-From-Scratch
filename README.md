@@ -76,14 +76,14 @@ Trained Model → [Generator] → Generate new text
 ### 1. Setup Environment
 
 ```bash
-# Clone repository
-cd /home/dark/LSTMS
+git clone https://github.com/Baraa-Rj/LSTMS-From-Scratch
+cd LSTMS-From-Scratch
 
-# Activate virtual environment (already configured)
+python -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
-pip install numpy
+# Install the package and its dependency (NumPy); add [test] for pytest
+pip install -e '.[test]'
 ```
 
 ### 2. Prepare Training Data
@@ -96,10 +96,16 @@ echo "Your training text goes here. The more data, the better the results." > in
 
 ### 3. Train the Model
 
+Run from the repository root (the script reads `input.txt` from the current directory):
+
 ```bash
 python -m lstms
-# or
-python src/lstms/__main__.py
+```
+
+### Run the Tests
+
+```bash
+python -m pytest
 ```
 
 **Training parameters** (edit in `__main__.py`):
@@ -145,9 +151,9 @@ Epoch 100/100, Loss: 0.9876
 ### Train with Custom Parameters
 
 ```python
-from Lstm import Lstm
-from Trainer import Trainer
-from Tokenizer import Tokenizer
+from lstms.Lstm import Lstm
+from lstms.Trainer import Trainer
+from lstms.Tokenizer import Tokenizer
 
 # Load your data
 with open('input.txt', 'r') as f:
@@ -168,7 +174,7 @@ losses = trainer.train(inputs_list, targets_list, epochs=200)
 ### Generate Text
 
 ```python
-from Generator import Generator
+from lstms.Generator import Generator
 
 generator = Generator(lstm, tokenizer)
 

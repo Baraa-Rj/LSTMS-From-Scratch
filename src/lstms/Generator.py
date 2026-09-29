@@ -1,5 +1,5 @@
 import numpy as np
-from Activation import Activation
+from .Activation import Activation
 
 class Generator:
     def __init__(self, lstm, tokenizer):
@@ -7,7 +7,8 @@ class Generator:
         self.tokenizer = tokenizer
 
     def generate(self, seed_text, length, temperature=1.0):
-  
+        if not seed_text:
+            raise ValueError("seed_text must not be empty")
         encoded = self.tokenizer.encode(seed_text)
         h = np.zeros((self.lstm.hidden_size, 1))
         C = np.zeros((self.lstm.hidden_size, 1))

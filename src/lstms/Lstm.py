@@ -1,6 +1,6 @@
-from Cell import Cell
+from .Cell import Cell
 import numpy as np
-from Activation import Activation
+from .Activation import Activation
 class Lstm:
     def __init__(self, input_size, hidden_size):
         self.input_size = input_size
