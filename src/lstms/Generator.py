@@ -1,5 +1,5 @@
 import numpy as np
-from Activation import Activation
+from .Activation import Activation
 
 class Generator:
     def __init__(self, lstm, tokenizer):

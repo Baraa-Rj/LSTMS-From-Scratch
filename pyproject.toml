@@ -11,7 +11,7 @@ authors = [{ name = "dark" }]
 license = { text = "Proprietary" }
 requires-python = ">=3.10"
 dependencies = [
-  "rich>=13.0",
+  "numpy>=1.21",
 ]
 
 [project.optional-dependencies]
