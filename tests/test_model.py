@@ -163,3 +163,18 @@ def test_generate_rejects_non_positive_temperature():
         with pytest.raises(ValueError, match="temperature"):
             make_generator().generate("hel", 5, temperature=temperature)
 
+
+def test_evaluate_reports_mean_loss_without_updating_weights():
+    np.random.seed(4)
+    tokenizer = Tokenizer(CORPUS)
+    inputs, targets = make_sequences(tokenizer, CORPUS, seq_length=5)
+    lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=8)
+    trainer = Trainer(lstm, learning_rate=0.1)
+    before = {name: getattr(lstm.cell, name).copy() for name in ["Wf", "Wi", "WC", "Wo"]}
+
+    expected = np.mean([lstm.compute_loss(lstm.forward(i)[0], t)[0] for i, t in zip(inputs, targets)])
+    assert trainer.evaluate(inputs, targets) == pytest.approx(expected)
+    # An untrained model is close to a uniform guess over the vocabulary.
+    assert trainer.evaluate(inputs, targets) == pytest.approx(np.log(tokenizer.vocab_size), abs=0.05)
+    for name, value in before.items():
+        assert np.array_equal(getattr(lstm.cell, name), value)
