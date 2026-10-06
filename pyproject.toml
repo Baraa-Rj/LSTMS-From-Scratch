@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "lstms"
 version = "0.1.0"
-description = "Minimal Python environment scaffold with sample app and tests"
+description = "Character-level LSTM language model implemented from scratch in NumPy"
 readme = "README.md"
-authors = [{ name = "dark" }]
+authors = [{ name = "Baraa Rjoob" }]
 license = { text = "Proprietary" }
 requires-python = ">=3.10"
 dependencies = [

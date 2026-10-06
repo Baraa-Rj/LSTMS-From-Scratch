@@ -112,3 +112,69 @@ def test_generate_rejects_empty_seed():
 def test_generate_rejects_out_of_vocabulary_seed():
     with pytest.raises(ValueError, match="not in the vocabulary.*'Z'"):
         make_generator().generate("heZ", 5)
+
+
+def test_generate_feeds_each_seed_character_exactly_once(monkeypatch):
+    """The first new character must be sampled from the distribution the model
+    predicts after reading the seed once, not after reading its last character
+    twice."""
+    rng = np.random.default_rng(3)
+    tokenizer = Tokenizer(CORPUS)
+    lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=8)
+    # Larger weights make the next-character distribution clearly state-dependent.
+    for name in ["Wf", "Wi", "WC", "Wo"]:
+        param = getattr(lstm.cell, name)
+        param[...] = rng.normal(scale=0.8, size=param.shape)
+    lstm.Wy[...] = rng.normal(scale=0.8, size=lstm.Wy.shape)
+
+    seed = "hel"
+    encoded = tokenizer.encode(seed)
+    logits, _, _ = lstm.forward(encoded)
+    expected_first = Activation.softmax(logits[-1]).flatten()
+
+    fed = []
+    real_forward = lstm.cell.forward
+
+    def recording_forward(x_t, h_prev, C_prev):
+        fed.append(int(np.argmax(x_t)))
+        return real_forward(x_t, h_prev, C_prev)
+
+    monkeypatch.setattr(lstm.cell, "forward", recording_forward)
+
+    seen = []
+
+    def greedy_choice(options, p):
+        seen.append(np.array(p, dtype=float))
+        return int(np.argmax(p))
+
+    monkeypatch.setattr(np.random, "choice", greedy_choice)
+
+    text = Generator(lstm, tokenizer).generate(seed, 4, temperature=1.0)
+    generated = tokenizer.encode(text[len(seed):])
+
+    np.testing.assert_allclose(seen[0], expected_first, rtol=1e-12, atol=1e-12)
+    # Each seed character is fed once, then each generated character once.
+    assert fed[: len(encoded)] == encoded
+    assert fed[len(encoded): len(encoded) + len(generated) - 1] == generated[:-1]
+
+
+def test_generate_rejects_non_positive_temperature():
+    for temperature in (0, -1.0):
+        with pytest.raises(ValueError, match="temperature"):
+            make_generator().generate("hel", 5, temperature=temperature)
+
+
+def test_evaluate_reports_mean_loss_without_updating_weights():
+    np.random.seed(4)
+    tokenizer = Tokenizer(CORPUS)
+    inputs, targets = make_sequences(tokenizer, CORPUS, seq_length=5)
+    lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=8)
+    trainer = Trainer(lstm, learning_rate=0.1)
+    before = {name: getattr(lstm.cell, name).copy() for name in ["Wf", "Wi", "WC", "Wo"]}
+
+    expected = np.mean([lstm.compute_loss(lstm.forward(i)[0], t)[0] for i, t in zip(inputs, targets)])
+    assert trainer.evaluate(inputs, targets) == pytest.approx(expected)
+    # An untrained model is close to a uniform guess over the vocabulary.
+    assert trainer.evaluate(inputs, targets) == pytest.approx(np.log(tokenizer.vocab_size), abs=0.05)
+    for name, value in before.items():
+        assert np.array_equal(getattr(lstm.cell, name), value)

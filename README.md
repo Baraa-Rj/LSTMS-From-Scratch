@@ -1,380 +1,300 @@
 # Character-Level LSTM from Scratch
 
-A complete implementation of Long Short-Term Memory (LSTM) networks built from scratch using only NumPy. This project demonstrates character-level language modeling, training via backpropagation through time (BPTT), and text generation.
+A character-level language model built on a single-layer LSTM, written in NumPy
+without a deep-learning framework. The forward pass, the backward pass
+(backpropagation through time), the optimizer step and the sampler are all
+implemented by hand, and the hand-derived gradients are checked against
+numerical gradients in the test suite.
 
-## 🎯 Features
+This is an educational implementation. It exists to show how an LSTM works end
+to end, not to produce good text or to compete with PyTorch.
 
-- **Pure NumPy implementation** - No deep learning frameworks
-- **Complete LSTM architecture** - Forget, input, candidate, and output gates
-- **Character-level modeling** - Learn patterns at the character level
-- **Backpropagation Through Time (BPTT)** - Full gradient computation
-- **Text generation** - Sample text with temperature control
-- **Gradient clipping** - Prevent exploding gradients
-- **Modular design** - Clean separation of concerns
+## What is implemented
 
-## 📚 Project Structure
+| Module | What it does |
+|---|---|
+| `Cell.py` | One LSTM step: forget, input, candidate and output gates. `forward` returns the new hidden and cell state plus a cache; `backward` returns gradients for all eight cell tensors and for the previous state. |
+| `Lstm.py` | Unrolls the cell over a sequence, projects each hidden state to vocabulary logits, computes softmax cross-entropy, and runs backpropagation through time over the whole sequence. |
+| `Trainer.py` | Stochastic gradient descent, one sequence per update, with element-wise gradient clipping. `evaluate` reports loss without updating weights. |
+| `Generator.py` | Samples text one character at a time, with a temperature parameter. |
+| `Tokenizer.py` | Character-to-index mapping built from the training text. |
+| `Activation.py` | Sigmoid, tanh and a numerically stable softmax. |
+| `__main__.py` | Command-line training script: data split, training loop, evaluation, samples. |
 
-```
-LSTMS/
-├── src/lstms/
-│   ├── Activation.py      # Sigmoid, tanh, softmax functions
-│   ├── Cell.py            # Core LSTM cell (forward & backward)
-│   ├── Lstm.py            # LSTM layer (sequence processing)
-│   ├── Tokenizer.py       # Character encoding/decoding
-│   ├── Trainer.py         # Training loop and weight updates
-│   ├── Generator.py       # Text generation with temperature
-│   └── __main__.py        # Main training script
-├── input.txt              # Training data (your text file)
-├── pyproject.toml         # Project configuration
-└── README.md              # This file
-```
+NumPy is the only runtime dependency. There is no automatic differentiation.
 
-## 🏗️ Architecture
+## The model
 
-### LSTM Cell
-The core computational unit implementing the standard LSTM equations:
+For input `x_t` (a one-hot character), previous hidden state `h_{t-1}` and
+previous cell state `C_{t-1}`, with `z_t = [h_{t-1}; x_t]`:
 
 ```
-f_t = σ(W_f · [h_{t-1}, x_t] + b_f)    # Forget gate
-i_t = σ(W_i · [h_{t-1}, x_t] + b_i)    # Input gate
-C̃_t = tanh(W_C · [h_{t-1}, x_t] + b_C) # Candidate cell state
-o_t = σ(W_o · [h_{t-1}, x_t] + b_o)    # Output gate
+f_t  = sigmoid(W_f z_t + b_f)        forget gate
+i_t  = sigmoid(W_i z_t + b_i)        input gate
+C~_t = tanh(W_C z_t + b_C)           candidate cell state
+o_t  = sigmoid(W_o z_t + b_o)        output gate
 
-C_t = f_t ⊙ C_{t-1} + i_t ⊙ C̃_t       # Update cell state
-h_t = o_t ⊙ tanh(C_t)                   # Update hidden state
+C_t  = f_t * C_{t-1} + i_t * C~_t    cell state
+h_t  = o_t * tanh(C_t)               hidden state
+y_t  = W_y h_t + b_y                 logits over the vocabulary
 ```
 
-**Components:**
-- 4 weight matrices (forget, input, candidate, output gates)
-- Hidden state (`h`) for short-term memory
-- Cell state (`C`) for long-term memory
-- Forward and backward propagation methods
+Each gate matrix has shape `(hidden, hidden + vocab)`. With the default
+configuration below (vocabulary 65, hidden size 64) the model has
+**37,505 parameters**: 4 x (64 x 129 + 64) = 33,280 in the cell, plus
+65 x 64 + 65 = 4,225 in the output layer.
 
-### Data Flow
+Weights are drawn from a standard normal and scaled by
+`1 / (vocab + hidden)`; biases start at zero.
 
-```
-Text Input
-    ↓
-[Tokenizer] → Character indices
-    ↓
-[LSTM Layer] → Process sequences timestep-by-timestep
-    ↓ [Cell] → Gates → State updates
-    ↓
-[Output Layer] → Softmax probabilities
-    ↓
-[Loss] → Cross-entropy
-    ↓
-[BPTT] → Compute gradients backward through time
-    ↓
-[Trainer] → Update weights with gradient descent
-    ↓
-Trained Model → [Generator] → Generate new text
-```
+## Training
 
-## 🚀 Quick Start
+- **Data.** The text is cut into windows of `seq_length` characters. The target
+  for a window is the same window shifted one character ahead, so the model
+  predicts the next character at every position.
+- **State.** Hidden and cell state start at zero for every window, so
+  gradients flow through at most `seq_length` steps.
+- **Loss.** Softmax cross-entropy per character, in nats. Reported losses are
+  means per character. The gradient used for the update is the gradient of the
+  loss summed over the window.
+- **Backward pass.** `Lstm.backward` walks the window from the last step to
+  the first, carrying `dh` and `dC` backwards and accumulating the gradients
+  of the shared weights across time steps.
+- **Update.** Plain SGD: each gradient is clipped element-wise to
+  `[-clip, clip]` and subtracted, scaled by the learning rate. One window per
+  update; windows are visited in the same order every epoch.
+- **Evaluation.** The last 10% of the text is held out. Training windows are
+  sampled from the first 90% and held-out windows from the last 10%, so no
+  held-out character is seen during training.
 
-### 1. Setup Environment
+## Gradient check
 
-```bash
-git clone https://github.com/Baraa-Rj/LSTMS-From-Scratch
-cd LSTMS-From-Scratch
+`tests/test_model.py::test_gradients_match_numerical_gradients` compares the
+analytic gradients from `Lstm.backward` with central-difference estimates
+(`eps = 1e-5`) for **every element of all ten parameter tensors**: `W_f`,
+`W_i`, `W_C`, `W_o`, `b_f`, `b_i`, `b_C`, `b_o`, `W_y` and `b_y`. It uses a
+small model (vocabulary 5, hidden size 4, 185 parameters in total), random
+weights and a six-step sequence, and requires a relative error below `1e-6`
+for each tensor.
 
-python -m venv .venv
-source .venv/bin/activate
+The largest relative error measured is `3.4e-09` (on `W_f`).
 
-# Install the package and its dependency (NumPy); add [test] for pytest
-pip install -e '.[test]'
-```
+## Results
 
-### 2. Prepare Training Data
-
-Create or add your `input.txt` file with training text:
-
-```bash
-echo "Your training text goes here. The more data, the better the results." > input.txt
-```
-
-### 3. Train the Model
-
-Run from the repository root (the script reads `input.txt` from the current directory):
+All numbers in this section come from one run of the code in this repository
+with its default settings:
 
 ```bash
 python -m lstms
 ```
 
-### Run the Tests
+| Setting | Value |
+|---|---|
+| Corpus | `input.txt`, Tiny Shakespeare: 1,115,394 characters, 65 distinct |
+| Training windows | 10,000, sampled from the first 90% of the text |
+| Held-out windows | 2,000, sampled from the last 10% |
+| Sequence length | 10 characters |
+| Hidden size | 64 |
+| Optimizer | SGD, learning rate 0.01, clipping 5.0, one window per update |
+| Epochs | 10 |
+| Seed | 0 |
+| Environment | Python 3.13.16, NumPy 2.5.3, one CPU core |
+| Wall time | 2 min 51 s |
+
+Loss per character, in nats (a uniform guess over 65 characters scores
+`ln 65 = 4.1744`):
+
+| Epoch | Training | Held-out |
+|---:|---:|---:|
+| before training | | 4.1744 |
+| 1 | 3.0866 | 2.6032 |
+| 2 | 2.4407 | 2.3267 |
+| 3 | 2.2748 | 2.2155 |
+| 4 | 2.1855 | 2.1658 |
+| 5 | 2.1260 | 2.1337 |
+| 6 | 2.0794 | 2.1105 |
+| 7 | 2.0409 | 2.0941 |
+| 8 | 2.0084 | 2.0817 |
+| 9 | 1.9799 | 2.0717 |
+| 10 | 1.9542 | 2.0636 |
+
+The training column is the mean loss recorded while the weights were being
+updated during that epoch; the held-out column is measured after the epoch.
+A held-out loss of 2.0636 nats is 2.98 bits per character, a perplexity of
+about 7.9.
+
+Samples from the trained model, 120 characters each, all seeded with `ROMEO:`:
+
+Temperature 0.5
+
+```
+ROMEO:
+May, be is a fore of this of the been of deest the forter I then your hour peelfing we come the the bresentless in the 
+```
+
+Temperature 1.0
+
+```
+ROMEO:
+And your a the sulate
+The all your from', murd
+Bulliest let.
+
+KINGBULE:
+Say, coulf tendee.
+
+HSRILOMEM:
+Paroyce
+M'sr no 
+```
+
+Temperature 1.5
+
+```
+ROMEO:
+Vhores upoozblaked exhse:
+ThiscOGtO
+Pray lordARf, anCfecl;wer;
+Are:
+A
+vord, miscafeRit: culmany's quvipuising;, is of e
+```
+
+What this shows: after ten short epochs the model has picked up the layout of
+a play script (a speaker name in capitals, a colon, a new line), common short
+words and plausible letter sequences. Most longer words are not real words,
+and nothing is coherent beyond a few characters. Lower temperature gives more
+repetitive, more word-like output; higher temperature gives more varied and
+more broken output. The model is small and far from converged, as the
+still-falling loss shows.
+
+Running the command twice with the same seed produced identical output on the
+machine above. Other platforms or NumPy builds may differ in the last digits.
+
+## Installation
+
+```bash
+git clone https://github.com/Baraa-Rj/LSTMS-From-Scratch
+cd LSTMS-From-Scratch
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[test]'
+```
+
+Python 3.10 or newer.
+
+## Running the tests
 
 ```bash
 python -m pytest
 ```
 
-**Training parameters** (edit in `__main__.py`):
-- `seq_length`: Length of input sequences (default: 10)
-- `hidden_size`: LSTM hidden layer size (default: 64)
-- `learning_rate`: Gradient descent step size (default: 0.01)
-- `epochs`: Number of training iterations (default: 100)
+23 tests:
 
-### 4. Expected Output
+- the gradient check described above;
+- loss decreases when training on a tiny corpus;
+- `evaluate` returns the mean per-character loss and leaves the weights unchanged;
+- the tokenizer round-trips text;
+- generation returns the seed plus exactly the requested number of in-vocabulary characters;
+- generation feeds each seed character once (a regression test for an earlier bug);
+- generation rejects an empty seed, a seed with characters outside the vocabulary, and a non-positive temperature;
+- training and held-out windows come from disjoint parts of the text, and targets are the inputs shifted by one character;
+- the training script runs end to end and is reproducible for a fixed seed;
+- the package declares its NumPy dependency and every module imports.
 
-```
-==================================================
-Character-Level LSTM Training
-==================================================
+Continuous integration runs the suite on Python 3.11, 3.12 and 3.13.
 
-1. Preparing training data...
-   Vocabulary size: 65
-   Training sequences: 1,115,384
+## Training
 
-2. Initializing LSTM...
-   Input size: 65
-   Hidden size: 64
+Run from the repository root, because the script reads `input.txt` from the
+current directory by default:
 
-3. Creating trainer...
-   Learning rate: 0.01
-
-4. Training...
-Epoch 10/100, Loss: 1.8234
-Epoch 20/100, Loss: 1.5123
-...
-Epoch 100/100, Loss: 0.9876
-
-5. Training complete!
-
-6. Generating text samples...
-   Temperature 0.5: "hello world hello world h..."
-   Temperature 1.0: "hello worle hello wopld..."
-   Temperature 1.5: "hxllo qorld wemlo vorld..."
+```bash
+python -m lstms                                    # the run reported above
+python -m lstms --epochs 20 --hidden-size 128      # a larger, slower run
+python -m lstms --input my_text.txt --seed 1       # another corpus
 ```
 
-## 📖 Usage Examples
+| Option | Default | Meaning |
+|---|---|---|
+| `--input` | `input.txt` | training text file |
+| `--epochs` | 10 | passes over the training windows |
+| `--seq-length` | 10 | characters per window |
+| `--hidden-size` | 64 | LSTM hidden units |
+| `--learning-rate` | 0.01 | SGD step size |
+| `--clip` | 5.0 | element-wise gradient clipping threshold |
+| `--train-windows` | 10000 | training windows sampled from the text |
+| `--heldout-windows` | 2000 | held-out windows used for evaluation |
+| `--seed` | 0 | seed for window sampling, weight initialisation and sampling |
+| `--sample-seed` | `ROMEO:` | text the samples start from |
+| `--sample-length` | 120 | characters generated per sample |
 
-### Train with Custom Parameters
+## Generating text
+
+The training script prints three samples at temperatures 0.5, 1.0 and 1.5 when
+it finishes. Trained weights are not saved to disk, so generation from Python
+means training in the same process:
 
 ```python
-from lstms.Lstm import Lstm
-from lstms.Trainer import Trainer
-from lstms.Tokenizer import Tokenizer
+import numpy as np
 
-# Load your data
-with open('input.txt', 'r') as f:
-    text = f.read()
-
-# Prepare data
-tokenizer = Tokenizer(text)
-# ... prepare inputs_list, targets_list ...
-
-# Create model with larger hidden size
-lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=128)
-
-# Train with custom learning rate
-trainer = Trainer(lstm, learning_rate=0.005, clip_value=5.0)
-losses = trainer.train(inputs_list, targets_list, epochs=200)
-```
-
-### Generate Text
-
-```python
 from lstms.Generator import Generator
+from lstms.Lstm import Lstm
+from lstms.Tokenizer import Tokenizer
+from lstms.Trainer import Trainer
 
-generator = Generator(lstm, tokenizer)
+text = open("input.txt", encoding="utf-8").read()[:20000]
+tokenizer = Tokenizer(text)
+encoded = tokenizer.encode(text)
 
-# Conservative generation (predictable)
-text1 = generator.generate("The", length=100, temperature=0.5)
+seq_length = 10
+starts = range(0, len(encoded) - seq_length, seq_length)
+inputs = [encoded[i:i + seq_length] for i in starts]
+targets = [encoded[i + 1:i + seq_length + 1] for i in starts]
 
-# Normal generation
-text2 = generator.generate("The", length=100, temperature=1.0)
+np.random.seed(0)
+lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=64)
+Trainer(lstm, learning_rate=0.01, clip_value=5.0).train(inputs, targets, epochs=5)
 
-# Creative generation (more random)
-text3 = generator.generate("The", length=100, temperature=1.5)
-
-print(text1)
+print(Generator(lstm, tokenizer).generate("ROMEO:", length=200, temperature=0.8))
 ```
 
-## 🧮 Model Parameters
+`temperature` rescales the predicted distribution before sampling: values below
+1 sharpen it, values above 1 flatten it.
 
-For a model with:
-- Vocabulary size: 65 characters
-- Hidden size: 64 units
-
-**Total parameters:** ~37,500
+## Repository structure
 
 ```
-Cell weights:
-  - Forget gate (W_f, b_f):     64 × 129 + 64 = 8,320
-  - Input gate (W_i, b_i):      64 × 129 + 64 = 8,320
-  - Candidate (W_C, b_C):       64 × 129 + 64 = 8,320
-  - Output gate (W_o, b_o):     64 × 129 + 64 = 8,320
-  
-Output layer:
-  - Weights (W_y):              65 × 64 = 4,160
-  - Bias (b_y):                 65
+src/lstms/
+    Activation.py    sigmoid, tanh, softmax
+    Cell.py          LSTM cell, forward and backward
+    Lstm.py          sequence unrolling, loss, backpropagation through time
+    Tokenizer.py     character vocabulary
+    Trainer.py       SGD with gradient clipping, evaluation
+    Generator.py     temperature sampling
+    __main__.py      training script (python -m lstms)
+tests/               pytest suite, including the gradient check
+input.txt            Tiny Shakespeare corpus
+.github/workflows/   CI: tests on Python 3.11, 3.12 and 3.13
 ```
 
-## 🔬 How It Works
+## Limitations
 
-### 1. Character Tokenization
-Converts text to integer sequences:
-```python
-"hello" → [46, 43, 50, 50, 53]
-```
+- **Small and slow.** One layer, one sequence per update, pure Python loops
+  over time steps, CPU only. The reported run trains on 10,000 windows, about
+  1% of the windows available in the corpus.
+- **Short context during training.** State is reset for every 10-character
+  window, so the model is never trained to carry information further than that.
+- **Basic optimisation.** Plain SGD with a fixed learning rate; no momentum,
+  Adam, learning-rate schedule, mini-batching or per-epoch shuffling.
+- **Modest results.** The samples above are representative. The model is not
+  trained to convergence and no hyperparameter search was done.
+- **No checkpoints.** Trained weights are not saved or loaded.
+- **Character level only.** No subword tokenisation, no embeddings: inputs are
+  one-hot vectors.
 
-### 2. Sliding Window Training
-Creates input-target pairs:
-```python
-Input:  "hello worl" → [46, 43, 50, 50, 53, 1, 61, 53, 56, 50]
-Target: "ello world" → [43, 50, 50, 53, 1, 61, 53, 56, 50, 42]
-```
+## References
 
-### 3. Forward Pass
-- One-hot encode each character
-- Process through LSTM cell timestep by timestep
-- Maintain hidden state (`h`) and cell state (`C`)
-- Project to vocabulary size with output layer
-
-### 4. Loss Computation
-- Apply softmax to get probability distribution
-- Compute cross-entropy loss: `-log(p(correct_char))`
-- Calculate gradients of loss w.r.t. outputs
-
-### 5. Backward Pass (BPTT)
-- Backpropagate through time (right to left)
-- Compute gradients for all gates
-- Accumulate gradients across timesteps
-- Clip gradients to prevent explosion
-
-### 6. Weight Update
-- Apply gradient descent: `W = W - lr × ∇W`
-- Update all LSTM cell weights and output layer
-
-### 7. Generation
-- Start with seed text to warm up state
-- Sample next character from probability distribution
-- Use temperature to control randomness
-- Feed sampled character back as input
-- Repeat for desired length
-
-## 🎛️ Hyperparameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `seq_length` | 10 | Length of input sequences |
-| `hidden_size` | 64 | Number of LSTM hidden units |
-| `learning_rate` | 0.01 | Gradient descent step size |
-| `clip_value` | 5.0 | Gradient clipping threshold |
-| `epochs` | 100 | Number of training iterations |
-| `temperature` | 1.0 | Sampling randomness (0.5-2.0) |
-
-**Tuning tips:**
-- Increase `hidden_size` for more model capacity
-- Decrease `learning_rate` if loss is unstable
-- Increase `seq_length` to learn longer dependencies
-- Lower `temperature` for more coherent generation
-- Increase `epochs` until loss plateaus
-
-## 📊 Example Results
-
-After training on Shakespeare's works:
-
-**Temperature 0.5 (Conservative):**
-```
-"To be or not to be, that is the question of the matter of the state"
-```
-
-**Temperature 1.0 (Balanced):**
-```
-"To be or not to be, that is the quection that mights to seart"
-```
-
-**Temperature 1.5 (Creative):**
-```
-"To be xr nat po ke, thet as fhe vuestmen whan strond bo"
-```
-
-## 🐛 Troubleshooting
-
-### Loss is NaN
-- Reduce learning rate (try 0.001)
-- Check gradient clipping is enabled
-- Verify input data is properly encoded
-
-### Loss not decreasing
-- Increase model size (`hidden_size`)
-- Train for more epochs
-- Check you have enough training data
-- Verify targets align with inputs
-
-### Out of memory
-- Reduce `hidden_size`
-- Use shorter sequences (`seq_length`)
-- Process fewer sequences per epoch
-
-### Generated text is gibberish
-- Train for more epochs
-- Increase training data size
-- Check vocabulary contains expected characters
-
-## 🔧 Advanced Usage
-
-### Save/Load Model
-
-```python
-import pickle
-
-# Save trained model
-with open('lstm_model.pkl', 'wb') as f:
-    pickle.dump({'lstm': lstm, 'tokenizer': tokenizer}, f)
-
-# Load model
-with open('lstm_model.pkl', 'rb') as f:
-    data = pickle.load(f)
-    lstm = data['lstm']
-    tokenizer = data['tokenizer']
-```
-
-### Batch Processing
-
-For large datasets, process in batches:
-
-```python
-batch_size = 100
-for i in range(0, len(inputs_list), batch_size):
-    batch_inputs = inputs_list[i:i+batch_size]
-    batch_targets = targets_list[i:i+batch_size]
-    # Train on batch
-```
-
-## 📝 Implementation Details
-
-### Numerical Stability
-- Softmax: Subtract max before exponential
-- Log probability: Add small epsilon to avoid log(0)
-- Gradient clipping: Prevent exploding gradients
-
-### Memory Efficiency
-- Store only necessary cache values
-- Process sequences one at a time
-- Clear intermediate gradients after update
-
-### Gradient Computation
-- Uses chain rule through all gates
-- Accumulates gradients across timesteps
-- Handles vanishing gradients via cell state
-
-## 🎓 Learning Resources
-
-This implementation follows the standard LSTM architecture from:
-- **Original paper:** Hochreiter & Schmidhuber (1997)
-- **Understanding LSTMs:** colah.github.io/posts/2015-08-Understanding-LSTMs
-- **Backpropagation:** Karpathy's "The Unreasonable Effectiveness of RNNs"
-
-## 📄 License
-
-This project is for educational purposes.
-
-## 🙏 Acknowledgments
-
-Built from scratch to understand LSTM internals, backpropagation through time, and character-level language modeling.
-
----
-
-**Note:** This is a pedagogical implementation. For production use, consider frameworks like PyTorch or TensorFlow that offer optimized implementations with GPU acceleration.
+- S. Hochreiter and J. Schmidhuber, "Long Short-Term Memory", Neural Computation, 1997.
+- C. Olah, "Understanding LSTM Networks", 2015.
+- A. Karpathy, "The Unreasonable Effectiveness of Recurrent Neural Networks", 2015. The Tiny Shakespeare corpus used here comes from that work.

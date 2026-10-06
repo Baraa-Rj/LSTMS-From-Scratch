@@ -47,7 +47,16 @@ class Trainer:
         self.update_weights(dWy, dby, cell_grads)
         
         return loss
-    
+
+    def evaluate(self, inputs_list, targets_list):
+        """Mean per-character cross-entropy over the sequences, without updating weights."""
+        total_loss = 0.0
+        for inputs, targets in zip(inputs_list, targets_list):
+            outputs, _, _ = self.lstm.forward(inputs)
+            loss, _ = self.lstm.compute_loss(outputs, targets)
+            total_loss += loss
+        return total_loss / len(inputs_list)
+
     def train(self, inputs_list, targets_list, epochs, print_every=1):
       
         losses = []
@@ -63,7 +72,7 @@ class Trainer:
             avg_loss = epoch_loss / num_sequences
             losses.append(avg_loss)
             
-            if (epoch + 1) % print_every == 0:
+            if print_every and (epoch + 1) % print_every == 0:
                 print(f"Epoch {epoch + 1}/{epochs}, Loss: {avg_loss:.4f}")
         
         return losses
