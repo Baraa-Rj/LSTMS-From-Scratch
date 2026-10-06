@@ -112,3 +112,54 @@ def test_generate_rejects_empty_seed():
 def test_generate_rejects_out_of_vocabulary_seed():
     with pytest.raises(ValueError, match="not in the vocabulary.*'Z'"):
         make_generator().generate("heZ", 5)
+
+
+def test_generate_feeds_each_seed_character_exactly_once(monkeypatch):
+    """The first new character must be sampled from the distribution the model
+    predicts after reading the seed once, not after reading its last character
+    twice."""
+    rng = np.random.default_rng(3)
+    tokenizer = Tokenizer(CORPUS)
+    lstm = Lstm(input_size=tokenizer.vocab_size, hidden_size=8)
+    # Larger weights make the next-character distribution clearly state-dependent.
+    for name in ["Wf", "Wi", "WC", "Wo"]:
+        param = getattr(lstm.cell, name)
+        param[...] = rng.normal(scale=0.8, size=param.shape)
+    lstm.Wy[...] = rng.normal(scale=0.8, size=lstm.Wy.shape)
+
+    seed = "hel"
+    encoded = tokenizer.encode(seed)
+    logits, _, _ = lstm.forward(encoded)
+    expected_first = Activation.softmax(logits[-1]).flatten()
+
+    fed = []
+    real_forward = lstm.cell.forward
+
+    def recording_forward(x_t, h_prev, C_prev):
+        fed.append(int(np.argmax(x_t)))
+        return real_forward(x_t, h_prev, C_prev)
+
+    monkeypatch.setattr(lstm.cell, "forward", recording_forward)
+
+    seen = []
+
+    def greedy_choice(options, p):
+        seen.append(np.array(p, dtype=float))
+        return int(np.argmax(p))
+
+    monkeypatch.setattr(np.random, "choice", greedy_choice)
+
+    text = Generator(lstm, tokenizer).generate(seed, 4, temperature=1.0)
+    generated = tokenizer.encode(text[len(seed):])
+
+    np.testing.assert_allclose(seen[0], expected_first, rtol=1e-12, atol=1e-12)
+    # Each seed character is fed once, then each generated character once.
+    assert fed[: len(encoded)] == encoded
+    assert fed[len(encoded): len(encoded) + len(generated) - 1] == generated[:-1]
+
+
+def test_generate_rejects_non_positive_temperature():
+    for temperature in (0, -1.0):
+        with pytest.raises(ValueError, match="temperature"):
+            make_generator().generate("hel", 5, temperature=temperature)
+
